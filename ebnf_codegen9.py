@@ -22,7 +22,7 @@ class StateNode(object):
 				print "\t\tgoto state_%s;"%labels[next_state]
 
 			print "\telse"
-			print "\t\tgoto error;"
+			print "\t\tgoto state_error;"
 			print ""
 		elif PartialIdentifier in map(type, self.transitions.keys()):
 			for c, next_state in self.transitions.items():
@@ -30,17 +30,17 @@ class StateNode(object):
 					continue
 
 				if c.subpattern == None:
-					print "\tif (parse_%s(%s, state_success))"%(c.identifier, str(c.accumulator))
+					print "\tif (parse_%s(%d, %d, state_success))"%(c.identifier, c.accumulator, c.delay)
 					print "\t\tgoto state_%s;"%labels[next_state]
 				else:
 					subpat_graph = caches[c.identifier]["graphs"][c.subpattern]
 					ident_graph = caches[c.identifier]["graphs"][ast_info.rules[c.identifier]]
 
-					print "\tif (parse_%s(%s, state_%s))"%(c.identifier, str(c.accumulator), ident_graph.labels[subpat_graph.entry])
+					print "\tif (parse_%s(%d, %d, state_%s))"%(c.identifier, c.accumulator, c.delay, ident_graph.labels[subpat_graph.entry])
 					print "\t\tgoto state_%s;"%labels[next_state]
 
 			print "\telse"
-			print "\t\tgoto error;"
+			print "\t\tgoto state_error;"
 			print ""
 		else:
 			print "\tif (EOF())"
@@ -48,7 +48,7 @@ class StateNode(object):
 			if None in self.transitions:
 				print "\t\tgoto state_%s;\n"%labels[self.transitions[None]]
 			else:
-				print "\t\tgoto error;\n"
+				print "\t\tgoto state_error;\n"
 
 			print "\tswitch (c) {"
 
@@ -60,7 +60,7 @@ class StateNode(object):
 				print "\t\t\tgoto state_%s;"%labels[next_state]
 
 			print "\t\tdefault:"
-			print "\t\t\tgoto error;"
+			print "\t\t\tgoto state_error;"
 			print "\t}\n"
 
 class StateGraph(object):
@@ -89,19 +89,26 @@ class StateGraph(object):
 		for state in self.nodes:
 			self.nodes[state].pretty_print(self.labels, caches, ast_info)
 
+		print "state_success:"
+		print "\treturn success;\n"
+
+		print "state_error:"
+		print "\treturn error;"
+
 class PartialIdentifier(ebnf_semantic.EBNF_Pattern):
-	def __init__(self, identifier, accumulator, subpattern):
+	def __init__(self, identifier, accumulator, delay, subpattern):
 		self.identifier = identifier
 		self.accumulator = accumulator
+		self.delay = delay
 		self.subpattern = subpattern
 		self.offset = 0
 
 	def __repr__(self):
-		return "%s(%s, %s, %s)"%(type(self).__name__, repr(self.identifier), repr(self.accumulator), repr(self.subpattern))
+		return "%s(%s, %s, %s, %s)"%(type(self).__name__, repr(self.identifier), repr(self.accumulator), repr(self.delay), repr(self.subpattern))
 
-def expand_map(prefix_map, ast_info, cache):
+def expand_for_merge(prefix_map, ast_info, cache):
 	if None in prefix_map:
-		return merge_maps(expand_map({c: subpattern for c, subpattern in prefix_map.items() if c != None}, ast_info, cache), {None: prefix_map[None]}, ast_info, cache)
+		return merge_maps(expand_for_merge({c: subpattern for c, subpattern in prefix_map.items() if c != None}, ast_info, cache), {None: prefix_map[None]}, ast_info, cache)
 
 	pattern = prefix_map.keys()[0]
 
@@ -111,38 +118,40 @@ def expand_map(prefix_map, ast_info, cache):
 
 		for c, subpattern in prefix_map.items():
 			if c == None:
-				new_map[c] = PartialIdentifier(pattern.identifier, 0, subpattern)
+				new_map[c] = PartialIdentifier(pattern.identifier, 0, 0, subpattern)
 			else:
-				new_map[c] = PartialIdentifier(pattern.identifier, 1, subpattern)
+				new_map[c] = PartialIdentifier(pattern.identifier, 1, 0, subpattern)
 	else:
 		if pattern.subpattern == None:
+			# XXX Becomes a delayed return
 			next_pattern = prefix_map[pattern]
 
 			if next_pattern == None:
-				new_map = {None: None}
+				# XXX huh?
+				new_map = {None: pattern}
 			else:
 				prefix_map = get_prefix_map(next_pattern, ast_info, cache)
+				delayed_pattern = PartialIdentifier(pattern.identifier, pattern.accumulator, pattern.delay + 1, None)
 				new_map = {}
 
 				for c, subpattern in prefix_map.items():
 					if subpattern == None:
-						new_map[c] = pattern
+						new_map[c] = delayed_pattern
 					else:
-						new_map[c] = ebnf_semantic.Concatenation([pattern, subpattern], pattern.offset)
+						new_map[c] = ebnf_semantic.Concatenation([delayed_pattern, subpattern], delayed_pattern.offset)
 		else:
 			prefix_map = get_prefix_map(pattern.subpattern, ast_info, cache)
 			new_map = {}
 
 			for c, subpattern in prefix_map.items():
 				if c == None:
-					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator, 0, subpattern)
 				else:
-					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator + 1, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator + 1, 0, subpattern)
 
 	return new_map
 
-# XXX expand_for_concatenation, expand_for_merge?
-def expand_if_optional(pattern, ast_info, cache):
+def expand_for_concatenation(pattern, ast_info, cache):
 	if type(pattern) == ebnf_semantic.Identifier:
 		prefix_map = get_prefix_map(ast_info.rules[pattern.identifier], ast_info, cache)
 
@@ -151,16 +160,15 @@ def expand_if_optional(pattern, ast_info, cache):
 
 			for c, subpattern in prefix_map.items():
 				if c == None:
-					new_map[c] = PartialIdentifier(pattern.identifier, 0, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, 0, 0, subpattern)
 				else:
-					new_map[c] = PartialIdentifier(pattern.identifier, 1, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, 1, 0, subpattern)
 
-			return new_map, True, False
+			return new_map, True
 	elif type(pattern) == PartialIdentifier:
 		if pattern.subpattern == None:
-			return None, False, False
+			return None, False
 
-		# XXX Have a is_circular function
 		prefix_map = get_prefix_map(pattern.subpattern, ast_info, cache)
 
 		if None in prefix_map:
@@ -168,13 +176,13 @@ def expand_if_optional(pattern, ast_info, cache):
 
 			for c, subpattern in prefix_map.items():
 				if c == None:
-					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator, 0, subpattern)
 				else:
-					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator + 1, subpattern)
+					new_map[c] = PartialIdentifier(pattern.identifier, pattern.accumulator + 1, 0, subpattern)
 
-			return new_map, True, False
+			return new_map, True
 
-	return None, False, False
+	return None, False
 
 def merge_maps(prefix_map1, prefix_map2, ast_info, cache):
 	if ebnf_semantic.Identifier in map(type, prefix_map1.keys()) and ebnf_semantic.Identifier in map(type, prefix_map2.keys()):
@@ -192,8 +200,8 @@ def merge_maps(prefix_map1, prefix_map2, ast_info, cache):
 				break
 
 		if identkey1 != identkey2:
-			expanded_map1 = expand_map(prefix_map1, ast_info, cache)
-			expanded_map2 = expand_map(prefix_map2, ast_info, cache)
+			expanded_map1 = expand_for_merge(prefix_map1, ast_info, cache)
+			expanded_map2 = expand_for_merge(prefix_map2, ast_info, cache)
 
 			return merge_maps(expanded_map1, expanded_map2, ast_info, cache)
 	elif PartialIdentifier in map(type, prefix_map1.keys()) and PartialIdentifier in map(type, prefix_map2.keys()):
@@ -211,15 +219,15 @@ def merge_maps(prefix_map1, prefix_map2, ast_info, cache):
 				break
 
 		if identkey1 != identkey2:
-			expanded_map1 = expand_map(prefix_map1, ast_info, cache)
-			expanded_map2 = expand_map(prefix_map2, ast_info, cache)
+			expanded_map1 = expand_for_merge(prefix_map1, ast_info, cache)
+			expanded_map2 = expand_for_merge(prefix_map2, ast_info, cache)
 
 			return merge_maps(expanded_map1, expanded_map2, ast_info, cache)
 	elif ebnf_semantic.Identifier in map(type, prefix_map1.keys()) or PartialIdentifier in map(type, prefix_map1.keys()):
-		expanded_map1 = expand_map(prefix_map1, ast_info, cache)
+		expanded_map1 = expand_for_merge(prefix_map1, ast_info, cache)
 		return merge_maps(expanded_map1, prefix_map2, ast_info, cache)
 	elif ebnf_semantic.Identifier in map(type, prefix_map2.keys()) or PartialIdentifier in map(type, prefix_map2.keys()):
-		expanded_map2 = expand_map(prefix_map2, ast_info, cache)
+		expanded_map2 = expand_for_merge(prefix_map2, ast_info, cache)
 		return merge_maps(prefix_map1, expanded_map2, ast_info, cache)
 	else:
 		new_map = {}
@@ -255,36 +263,22 @@ def concatenate_to_map(prefix_map, terms, ast_info, cache):
 		else:
 			next_pattern = ebnf_semantic.Concatenation(terms, terms[0].offset)
 
+		if type(prefix_map[None]) == PartialIdentifier:
+			if type(next_pattern) == ebnf_semantic.Concatenation:
+				next_pattern = ebnf_semantic.Concatenation([prefix_map[None]] + next_pattern.terms, prefix_map[None].offset)
+			else:
+				next_pattern = ebnf_semantic.Concatenation([prefix_map[None], next_pattern], prefix_map[None].offset)
+
 		possible_map1 = concatenate_to_map({c: subpattern for c, subpattern in prefix_map.items() if c != None}, terms, ast_info, cache)
 		possible_map2 = get_prefix_map(next_pattern, ast_info, cache)
 		return merge_maps(possible_map1, possible_map2, ast_info, cache)
 
 	if ebnf_semantic.Identifier in map(type, prefix_map.keys()) or PartialIdentifier in map(type, prefix_map.keys()):
 		# There can be only a single transition in this case
-		expanded_map, is_optional, is_circular = expand_if_optional(prefix_map.keys()[0], ast_info, cache)
+		expanded_map, is_optional = expand_for_concatenation(prefix_map.keys()[0], ast_info, cache)
 
 		if is_optional:
 			return concatenate_to_map(expanded_map, terms, ast_info, cache)
-		elif is_circular:
-			return {None: None}
-#			expanded_map = {c: subpattern for c, subpattern in expanded_map.items() if c != None}
-#			pattern = prefix_map.keys()[0]
-#			accum_pattern = PartialIdentifier(pattern.identifier, None, None)
-
-#			if len(terms) == 1:
-#				next_map = get_prefix_map(terms[0], ast_info, cache)
-#			else:
-#				next_map = get_prefix_map(ebnf_semantic.Concatenation(terms, terms[0].offset), ast_info, cache)
-
-#			new_next_map = {}
-
-#			for c, subpattern in next_map.items():
-#				if subpattern == None:
-#					new_next_map[c] = accum_pattern
-#				else:
-#					new_next_map[c] = ebnf_semantic.Concatenation([accum_pattern, subpattern], accum_pattern.offset)
-
-#			return merge_maps(expanded_map, new_next_map, ast_info, cache)
 
 	new_map = {}
 
@@ -300,9 +294,6 @@ def concatenate_to_map(prefix_map, terms, ast_info, cache):
 		new_map[c] = next_pattern
 
 	return new_map
-
-def get_prefix_map_for_return_pattern(pattern, ast_info, cache):
-	return {None: pattern}
 
 def get_prefix_map_for_partial_identifier(pattern, ast_info, cache):
 	return {pattern: None}
@@ -346,11 +337,82 @@ def get_prefix_map_for_repetition(pattern, ast_info, cache):
 	return new_map
 
 def get_prefix_map_for_concatenation(pattern, ast_info, cache):
-	submap = get_prefix_map(pattern.terms[0], ast_info, cache)
-	return concatenate_to_map(submap, pattern.terms[1:], ast_info, cache)
+	terms = [pattern.terms[0]]
+
+	for term in pattern.terms[1:]:
+		if type(terms[-1]) == ebnf_semantic.Repetition:
+			if type(term) == ebnf_semantic.Repetition:
+				terms[-1] = ebnf_semantic.Alternation([terms[-1], term], terms[-1].offset)
+			elif type(term) == ebnf_semantic.Identifier:
+				if ast_info.rules[term.identifier] == terms[-1]:
+					terms[-1] = term
+				else:
+					terms.append(term)
+			elif type(term) == PartialIdentifier:
+				if term.subpattern == terms[-1]:
+					terms[-1] = term
+				else:
+					terms.append(term)
+			else:
+				terms.append(term)
+		elif type(terms[-1]) == ebnf_semantic.Identifier and type(ast_info.rules[terms[-1].identifier]) == ebnf_semantic.Repetition:
+			if type(term) == ebnf_semantic.Repetition:
+				if ast_info.rules[terms[-1].identifier] == term:
+					continue
+				else:
+					terms.append(term)
+			else:
+				terms.append(term)
+		elif type(terms[-1]) == PartialIdentifier and type(terms[-1].subpattern) == ebnf_semantic.Repetition:
+			if type(term) == ebnf_semantic.Repetition:
+				if terms[-1].subpattern == term:
+					continue
+				else:
+					terms.append(term)
+			else:
+				terms.append(term)
+		else:
+			terms.append(term)
+
+	submap = get_prefix_map(terms[0], ast_info, cache)
+
+	if len(terms) == 1:
+		return submap
+
+	return concatenate_to_map(submap, terms[1:], ast_info, cache)
 
 def get_prefix_map_for_alternation(pattern, ast_info, cache):
-	submaps = [get_prefix_map(subpattern, ast_info, cache) for subpattern in pattern.clauses]
+	clauses = []
+
+	for clause in set(pattern.clauses):
+		add_to_clauses = True
+
+		if type(clause) == ebnf_semantic.Identifier:
+			for clause1 in clauses:
+				if type(clause1) == ebnf_semantic.Identifier and ast_info.rules[clause1.identifier] == ast_info.rules[clause.identifier]:
+					add_to_clauses = False
+					break
+				elif type(clause1) == PartialIdentifier and clause1.subpattern == ast_info.rules[clause.identifier]:
+					add_to_clauses = False
+					break
+		elif type(clause) == PartialIdentifier:
+			for clause1 in clauses:
+				if type(clause1) == PartialIdentifier and clause1.subpattern == clause.subpattern:
+					add_to_clauses = False
+					break
+		else:
+			for clause1 in set(clauses):
+				if type(clause1) == ebnf_semantic.Identifier and ast_info.rules[clause1.identifier] == clause:
+					add_to_clauses = False
+					break
+				elif type(clause1) == PartialIdentifier and clause1.subpattern == clause:
+					add_to_clauses = False
+					break
+
+		if add_to_clauses:
+			clauses.append(clause)
+
+	submaps = [get_prefix_map(subpattern, ast_info, cache) for subpattern in clauses]
 	return reduce(lambda map1, map2: merge_maps(map1, map2, ast_info, cache), submaps)
 
 def get_prefix_map(pattern, ast_info, cache):
@@ -389,12 +451,13 @@ def build_state_graph_recurse(pattern, ast_info, cache):
 	return cache["graphs"][pattern]
 
 def build_state_graph(identifier, ast_info):
-	cache = {"graphs": {None: None}, "maps": {}, "partials": {}}
+	print identifier
+	cache = {"graphs": {None: None}, "maps": {}}
 	subgraph = build_state_graph_recurse(ast_info.rules[identifier], ast_info, cache)
 	return subgraph, cache
 
 def build_state_graphs(ast_info):
-	return {identifier: build_state_graph(identifier, ast_info) for identifier in ["U"]}#ast_info.rules}
+	return {identifier: build_state_graph(identifier, ast_info) for identifier in ast_info.rules if identifier not in ["ZK", "ZY", "U"]}
 
 if len(sys.argv) != 3:
 	print "Usage: %s <grammar file> <top_id>"%(sys.argv[0])
