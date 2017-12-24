@@ -33,11 +33,12 @@ class ReduceAction(ebnf_semantic.EBNF_Pattern):
 		return "%s(%s, %s)"%(type(self).__name__, repr(self.identifier), repr(self.thread))
 
 class ForkAction(ebnf_semantic.EBNF_Pattern):
-	def __init__(self):
+	def __init__(self, threads):
 		self.offset = 0
+		self.threads = tuple(sorted(list(threads)))
 
 	def __repr__(self):
-		return "%s()"%type(self).__name__
+		return "%s(%s)"%(type(self).__name__, repr(self.threads))
 
 def print_state_graph_recurse(graph, node, cache):
 	for symbol, next_node in node.transitions.items():
@@ -131,12 +132,14 @@ def simplify_list(pattern):
 def expand_transitions(transitions, cache):
 	ast_info = cache["ast_info"]
 	clauses = []
+	threads = set({})
 
 	for symbol, next_pattern in transitions.items():
 		if type(symbol) == ebnf_semantic.Identifier:
 			identifier_pattern = ast_info.rules[symbol.identifier]
 			thread = simplify_list(ebnf_semantic.Concatenation([symbol, next_pattern]))
 			clause = simplify_list(ebnf_semantic.Concatenation([ExpandedIdentifier(symbol.identifier, identifier_pattern, thread), next_pattern]))
+			threads.add(thread)
 		elif type(symbol) == ExpandedIdentifier:
 			subnode = build_state_node(symbol.subpattern, cache)
 			clauses1 = []
@@ -148,15 +151,16 @@ def expand_transitions(transitions, cache):
 					symbol2 = symbol1
 
 				if next_pattern1 == None:
-					clause1 = simplify_list(ebnf_semantic.Concatenation([symbol2, ReduceAction(symbol.identifier, symbol.thread)]))
+					clause1 = simplify_list(ebnf_semantic.Concatenation([symbol2, ReduceAction(symbol.identifier, symbol.thread), next_pattern]))
 				else:
-					clause1 = simplify_list(ebnf_semantic.Concatenation([symbol2, ExpandedIdentifier(symbol.identifier, next_pattern1, symbol.thread)]))
+					clause1 = simplify_list(ebnf_semantic.Concatenation([symbol2, ExpandedIdentifier(symbol.identifier, next_pattern1, symbol.thread), next_pattern]))
 
 				clauses1.append(clause1)
 
 			clause = simplify_list(ebnf_semantic.Alternation(clauses1))
 		elif type(symbol) == ForkAction:
 			clause = next_pattern
+			threads.update(symbol.threads)
 		elif type(symbol) == str:
 			clause = simplify_list(ebnf_semantic.Concatenation([ebnf_semantic.Terminal(symbol), next_pattern]))
 		elif symbol == None:
@@ -167,7 +171,10 @@ def expand_transitions(transitions, cache):
 		clauses.append(clause)
 
 	expanded_pattern = simplify_list(ebnf_semantic.Alternation(clauses))
-	expanded_pattern = simplify_list(ebnf_semantic.Concatenation([ForkAction(), expanded_pattern]))
+
+	if len(threads) > 0:
+		expanded_pattern = simplify_list(ebnf_semantic.Concatenation([ForkAction(threads), expanded_pattern]))
+
 	return expanded_pattern
 
 def build_state_node_for_terminal(pattern, cache):
@@ -374,16 +381,18 @@ def merge_fork_nodes(graph):
 	new_forks = set({})
 
 	for node in graph.forks:
-		if node.transitions[ForkAction()] in graph.forks:
+		action = node.transitions.keys()[0]
+
+		if node.transitions[action] in graph.forks:
 			changed = True
 
 			for prev_node, symbol in node.predecessors:
-				prev_node.transitions[symbol] = node.transitions[ForkAction()]
-				node.transitions[ForkAction()].predecessors.discard((node, ForkAction()))
-				node.transitions[ForkAction()].predecessors.add((prev_node, symbol))
+				prev_node.transitions[symbol] = node.transitions[action]
+				node.transitions[action].predecessors.discard((node, action))
+				node.transitions[action].predecessors.add((prev_node, symbol))
 
 			if graph.entry == node:
-				graph.entry = node.transitions[ForkAction()]
+				graph.entry = node.transitions[action]
 		else:
 			new_forks.add(node)
 
@@ -398,7 +407,7 @@ def minimize_state_graph(graph):
 
 def build_state_graphs(ast_info):
 	cache = {"graphs": {}, "nodes": {}, "ast_info": ast_info}
-	graphs = {identifier: copy_graph(build_state_graph(pattern, cache)) for identifier, pattern in ast_info.rules.items()}
+	graphs = {identifier: copy_graph(build_state_graph(pattern, cache)) for identifier, pattern in ast_info.rules.items() if identifier in ["TAON"]}
 
 	for graph in graphs.values():
 		gen_predecessors(graph)
