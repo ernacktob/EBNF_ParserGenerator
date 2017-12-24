@@ -33,8 +33,11 @@ class EBNF_Pattern(object):
 	def __eq__(self, other):
 		return repr(self) == repr(other)
 
+	def __ne__(self, other):
+		return repr(self) != repr(other)
+
 class Terminal(EBNF_Pattern):
-	def __init__(self, terminal, offset):
+	def __init__(self, terminal, offset=0):
 		self._terminal = terminal
 		self._offset = offset
 
@@ -50,7 +53,7 @@ class Terminal(EBNF_Pattern):
 		return self._offset
 
 class Identifier(EBNF_Pattern):
-	def __init__(self, identifier, offset):
+	def __init__(self, identifier, offset=0):
 		self._identifier = identifier
 		self._offset = offset
 
@@ -66,9 +69,13 @@ class Identifier(EBNF_Pattern):
 		return self._offset
 
 class Optional(EBNF_Pattern):
-	def __init__(self, rhs, offset):
+	def __init__(self, rhs, offset=None):
 		self._rhs = rhs
-		self._offset = offset
+
+		if not offset:
+			self._offset = rhs.offset
+		else:
+			self._offset = offset
 
 	def __repr__(self):
 		return "%s(%s)"%(type(self).__name__, repr(self.rhs))
@@ -82,9 +89,13 @@ class Optional(EBNF_Pattern):
 		return self._offset
 
 class Repetition(EBNF_Pattern):
-	def __init__(self, rhs, offset):
+	def __init__(self, rhs, offset=None):
 		self._rhs = rhs
-		self._offset = offset
+
+		if not offset:
+			self._offset = rhs.offset
+		else:
+			self._offset = offset
 
 	def __repr__(self):
 		return "%s(%s)"%(type(self).__name__, repr(self.rhs))
@@ -98,9 +109,24 @@ class Repetition(EBNF_Pattern):
 		return self._offset
 
 class Concatenation(EBNF_Pattern):
-	def __init__(self, terms, offset):
-		self._terms = tuple(terms)
-		self._offset = offset
+	def __init__(self, terms, offset=None):
+		_terms = []
+
+		for term in terms:
+			if type(term) == Concatenation:
+				_terms.extend(term.terms)
+			else:
+				_terms.append(term)
+
+		self._terms = tuple(_terms)
+
+		if not offset:
+			if _terms[0] == None:
+				self._offset = 0 # Should not happen for real things anyway
+			else:
+				self._offset = _terms[0].offset
+		else:
+			self._offset = offset
 
 	def __repr__(self):
 		return "%s(%s)"%(type(self).__name__, repr(self.terms))
@@ -114,10 +140,24 @@ class Concatenation(EBNF_Pattern):
 		return self._offset
 
 class Alternation(EBNF_Pattern):
-	def __init__(self, clauses, offset):
-		self._clauses = tuple(clauses)
-		self._offset = offset
+	def __init__(self, clauses, offset=None):
+		_clauses = []
 
+		for clause in clauses:
+			if type(clause) == Alternation:
+				_clauses.extend(clause.clauses)
+			else:
+				_clauses.append(clause)
+
+		self._clauses = tuple(_clauses)
+
+		if not offset:
+			if _clauses[0] == None:
+				self._offset = 0 # Should not happen for real things anyway
+			else:
+				self._offset = _clauses[0].offset
+		else:
+			self._offset = offset
 	def __repr__(self):
 		return "%s(%s)"%(type(self).__name__, repr(self.clauses))
 
