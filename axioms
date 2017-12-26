@@ -1,0 +1,79 @@
+Functors:
+---------
+Powerset: Set -> Set
+S' in Powerset(S) <=> S contains S'
+
+Functions: Set -> Set
+Functions(A, B) = set of all functions from A to B
+
+FinitePowerset: Set -> Set
+S' in FinitePowerset(S) <=> S contains S' and |S'| in N
+
+Tuples: Set -> Set
+Tuples(S) = Union(S^n, n in N)
+
+FreeMonoid: Set -> Monoid
+FreeMonoid(S) = free monoid over the set S
+
+Forgetful: Monoid -> Set
+Forgetful(M) = underlying set of M
+
+ParseTree_0: Set x Set -> Monoid
+ParseTree_0(A, B) = FreeMonoid(B)
+
+Entity_0: Set x Set -> Set
+Entity_0(A, B) = A x Forgetful(ParseTree_0(A, B))
+
+for (n in N^+) {
+	ParseTree_n: Set x Set -> Monoid
+	ParseTree_n(A, B) = FreeMonoid(Forgetful(ParseTree_{n-1}(A, B)) U Entity_{n-1}(A, B))
+
+	Entity_n: Set x Set -> Set
+	Entity_n(A, B) = A x Forgetful(ParseTree_n(A, B))
+}
+
+ParseTrees: Set x Set -> Monoid
+ParseTrees(A, B) = FreeMonoid(Union(n in N, Forgetful(ParseTree_n(A, B))))
+
+Entities: Set x Set -> Set
+Entities(A, B) = A x ParseTrees(A, B)
+
+Patterns: Set x Set -> Set
+Patterns(A, B) = Powerset(Forgetful(ParseTrees(A, B)))
+
+Objects:
+-----
+Grammar = tuple (Set Alphabet, Set Identifier, Set Bindings) where each element of Bindings is a function Identifier x Alphabet -> Patterns(Identifier, Alphabet).
+Set Alphabet = Grammar.Alphabet
+Set Identifier = Grammar.Identifier
+Monoid ParseTree = ParseTrees(Identifier, Alphabet)
+Set Pattern = Patterns(Identifier, Alphabet)
+
+Notation:
+---------
+a, b, c: elements of ParseTree
+A, B, C: elements of Pattern
+I: element of Identifier
+e: identity element
+E: {e}
+
+Functions:
+----------
+Alternation: FinitePowerset(Pattern) -> Pattern
+Concatenation: Tuples(Pattern) -> Pattern
+Repetition: Pattern -> Pattern
+Optional: Pattern -> Pattern
+len: ParseTree -> N
+lens: Pattern -> Powerset(N)
+
+Definitions:
+------------
+a in Alternation({A_1, ..., A_n}) <=> (a in A_1) || ... || (a in A_n)
+a in Concatenation((A_1, ..., A_n)) <=> exist a_1, ..., a_n in ParseTree such that (a = a_1...a_n) && (a_1 in A_1) && ... && (a_n in A_n)
+a in Repetition(A) <=> (a = "") || (a in A) || (exist a_1, a_2 in Repetition(A) such that a = a_1a_2)
+Optional(A) = Alternation({A, E})
+len(e) = 0
+len(ab) = len(a) + len(b)
+len((I, a)) = len(a)
+(a in Alphabet) => len(a) = 1
+n in lens(A) <=> exists a in A such that len(a) = n

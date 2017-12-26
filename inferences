@@ -1,0 +1,35 @@
+Inferences:
+-----------
+(len(a) = 1) => (Simplify(Terminal(a)) = Terminal(a))
+Simplify(Terminal(a)) = Terminal(a[0]), Terminal(a[1:])
+Simplify(EOF) = EOF
+Simplify(EOF, ...) = ...
+Simplify(A, ...) = Simplify(A), ...
+(len(a) = 1) => (Simplify(Terminal(a), B | Terminal(a), C) = Terminal(a), (B | C))	# Could implement quicksort for the Terminals
+(len(a) = 1) => (Simplify(Terminal(a) | Terminal(a), A) = Terminal(a), (EOF | A))
+Simplify(EOF | EOF) = EOF
+Simplify(EOF | EOF | ...) = EOF | ...
+Simplify(... | EOF) = EOF | ...
+Simplify(EOF | ...) = EOF | Simplify(...)
+Simplify(Identifier(I), A | Identifier(I), B) = Identifier(I), (A | B)		# Could implement quicksort for the Identifiers
+Simplify(Identifier(I) | Identifier(I), ...) = Identifier(I), (EOF | A)
+Simplify(A | ...) = Simplify(A) | Simplify(...)
+Simplify([EOF]) = EOF
+Simplify([A]) = EOF | Simplify(A)
+Simplify({EOF}) = EOF
+Simplify({A}) = {A}
+Simplify(Identifier(I)) = Identifier(I)
+
+Graph(EOF) = {EOF: None}
+(len(a) = 1) => (Graph(Terminal(a)) = {a: None})
+(len(a) = 1) => (Graph(Terminal(a), ...) = {a: Graph(...)})
+(len(a) = 1) && (len(b) = 1) => (Graph(Terminal(a) | Terminal(b), B) = {a: None, b: Graph(B)})
+(len(a) = 1) => (Graph(EOF | Terminal(a), A) = {EOF: None, a: Graph(A)})
+Graph({A}) = SolveEquation(Graph({A}) = Graph(A, {A} | EOF))
+Graph({A}, ...) = SolveEquation(Graph({A}, ...) = Graph(A, {A}, ... | ...))
+Graph({A} | ...) = SolveEquation(Graph({A} | ...) = Graph(A, {A} | EOF | ...))
+Graph(Identifier(I)) = {Identifier(I): None}
+Graph(Identifier(I), ...) = SolveEquation(Graph(Identifier(I)) = Graph(
+Graph(Identifier(I)
+
+Graph(A) = Graph(Simplify(A))
