@@ -12,7 +12,7 @@ Simplify(EOF | EOF | ...) = EOF | ...
 Simplify(... | EOF) = EOF | ...
 Simplify(EOF | ...) = EOF | Simplify(...)
 Simplify(Identifier(I), A | Identifier(I), B) = Identifier(I), (A | B)		# Could implement quicksort for the Identifiers
-Simplify(Identifier(I) | Identifier(I), ...) = Identifier(I), (EOF | A)
+Simplify(Identifier(I) | Identifier(I), A) = Identifier(I), (EOF | A)
 Simplify(A | ...) = Simplify(A) | Simplify(...)
 Simplify([EOF]) = EOF
 Simplify([A]) = EOF | Simplify(A)
@@ -20,16 +20,22 @@ Simplify({EOF}) = EOF
 Simplify({A}) = {A}
 Simplify(Identifier(I)) = Identifier(I)
 
+Expand({A}) = A, {A} | EOF
+Expand({A}, ...) = A, {A}, ... | ...
+Expand({A} | ...) = A, {A} | EOF | ...
+Expand(A, ...) = Expand(A), ...
+Expand(A | ...) = Expand(A) | Expand(...)
+Expand(Identifier(I)) = 
+Expand(A) = Simplify(A)
+
+Graph(A) = Graph(Simplify(A))
 Graph(EOF) = {EOF: None}
 (len(a) = 1) => (Graph(Terminal(a)) = {a: None})
 (len(a) = 1) => (Graph(Terminal(a), ...) = {a: Graph(...)})
 (len(a) = 1) && (len(b) = 1) => (Graph(Terminal(a) | Terminal(b), B) = {a: None, b: Graph(B)})
 (len(a) = 1) => (Graph(EOF | Terminal(a), A) = {EOF: None, a: Graph(A)})
-Graph({A}) = SolveEquation(Graph({A}) = Graph(A, {A} | EOF))
-Graph({A}, ...) = SolveEquation(Graph({A}, ...) = Graph(A, {A}, ... | ...))
-Graph({A} | ...) = SolveEquation(Graph({A} | ...) = Graph(A, {A} | EOF | ...))
 Graph(Identifier(I)) = {Identifier(I): None}
-Graph(Identifier(I), ...) = SolveEquation(Graph(Identifier(I)) = Graph(
-Graph(Identifier(I)
-
-Graph(A) = Graph(Simplify(A))
+Graph(Identifier(I), ...) = {Identifier(I): Graph(...)}
+(len(a) = 1) && cannot_start_with(I, a) => (Graph(a | Identifier(I), A) = {a: None, Identifier(I): Graph(A)})
+cannot_be_empty(I) => (Graph(EOF | Identifier(I), A) = {EOF: None, Identifier(I): Graph(A)})
+Graph(A) = SolveEquation(Graph(A) = Graph(Expand(A)))
